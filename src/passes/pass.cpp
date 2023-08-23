@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "passes.h"
 #include <chrono>
 #include <sstream>
 
@@ -490,6 +491,7 @@ void PassRegistry::registerPasses() {
                "removes local.tees, replacing them with sets and gets",
                createUnteePass);
   registerPass("vacuum", "removes obviously unneeded code", createVacuumPass);
+  registerPass("rename-functions", "renames functions using a command", createRenameFunctionsPass);
   // registerPass(
   //   "lower-i64", "lowers i64 into pairs of i32s", createLowerInt64Pass);
 
