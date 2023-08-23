@@ -161,6 +161,7 @@ Pass* createVacuumPass();
 
 // Test passes:
 Pass* createCatchPopFixupPass();
+Pass* createRenameFunctionsPass();
 
 } // namespace wasm
 

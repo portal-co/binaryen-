@@ -166,6 +166,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(BUILD_LLVM_DWARF)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project/include)
 endif()
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 # Add output directory to include path so config.h can be found
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
