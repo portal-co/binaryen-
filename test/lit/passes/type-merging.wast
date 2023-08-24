@@ -34,12 +34,12 @@
   ;; CHECK-NEXT:  (local $f (ref null $F))
   ;; CHECK-NEXT:  (local $g (ref null $G))
   ;; CHECK-NEXT:  (drop
-  ;; CHECK-NEXT:   (ref.cast null $A
+  ;; CHECK-NEXT:   (ref.cast (ref null $A)
   ;; CHECK-NEXT:    (local.get $a)
   ;; CHECK-NEXT:   )
   ;; CHECK-NEXT:  )
   ;; CHECK-NEXT:  (drop
-  ;; CHECK-NEXT:   (ref.cast null $F
+  ;; CHECK-NEXT:   (ref.cast (ref null $F)
   ;; CHECK-NEXT:    (local.get $a)
   ;; CHECK-NEXT:   )
   ;; CHECK-NEXT:  )
@@ -62,13 +62,13 @@
 
     ;; A cast of $A has no effect.
     (drop
-      (ref.cast null $A
+      (ref.cast (ref null $A)
         (local.get $a)
       )
     )
     ;; A cast of $F prevents it from being merged.
     (drop
-      (ref.cast null $F
+      (ref.cast (ref null $F)
         (local.get $a)
       )
     )
@@ -342,7 +342,7 @@
   ;; CHECK-NEXT:  (local $x (ref null $X))
   ;; CHECK-NEXT:  (local $y (ref null $X))
   ;; CHECK-NEXT:  (drop
-  ;; CHECK-NEXT:   (ref.cast $A
+  ;; CHECK-NEXT:   (ref.cast (ref $A)
   ;; CHECK-NEXT:    (local.get $a)
   ;; CHECK-NEXT:   )
   ;; CHECK-NEXT:  )
@@ -356,7 +356,7 @@
     (local $y (ref null $Y))
 
     (drop
-      (ref.cast $A
+      (ref.cast (ref $A)
         (local.get $a)
       )
     )
@@ -689,7 +689,7 @@
   ;; CHECK-NEXT:   (i32.const 0)
   ;; CHECK-NEXT:   (global.get $global$0)
   ;; CHECK-NEXT:   (i64.const 0)
-  ;; CHECK-NEXT:   (array.new_fixed $I)
+  ;; CHECK-NEXT:   (array.new_fixed $I 0)
   ;; CHECK-NEXT:  )
   ;; CHECK-NEXT: )
   (func $0 (type $G) (param $0 (ref $C)) (result (ref $D))
@@ -698,7 +698,7 @@
       (i32.const 0)
       (global.get $global$0)
       (i64.const 0)
-      (array.new_fixed $I)
+      (array.new_fixed $I 0)
     )
   )
 )
@@ -896,7 +896,7 @@
   ;; CHECK:      (func $test (type $none_=>_ref|$b|) (result (ref $b))
   ;; CHECK-NEXT:  (local $0 (ref null $a))
   ;; CHECK-NEXT:  (drop
-  ;; CHECK-NEXT:   (ref.test $y
+  ;; CHECK-NEXT:   (ref.test (ref $y)
   ;; CHECK-NEXT:    (struct.new_default $x)
   ;; CHECK-NEXT:   )
   ;; CHECK-NEXT:  )
@@ -908,7 +908,7 @@
 
     ;; Cast to prevent $x and $y from being merged.
     (drop
-      (ref.test $y
+      (ref.test (ref $y)
         (struct.new_default $x)
       )
     )
@@ -953,6 +953,80 @@
  )
 )
 
+;; Regression test for a bug where we were over-aggressive in merging during the
+;; supertype phase. Types A, B, C, D1, and D2 will all start out in the same
+;; supertype merging partition, but partition refinement will show that A, B,
+;; and C are distinct. We previously continued to merge D1 and D2, but that is
+;; incorrect, as such a merge will either make g1 or g2 invalid below. The fix
+;; was to manually split partitions that end up containing separate type trees.
+(module
+ ;; CHECK:      (rec
+ ;; CHECK-NEXT:  (type $I (struct (field anyref)))
+ (type $I (sub    (struct (field anyref))))
+ ;; CHECK:       (type $J (sub $I (struct (field eqref))))
+ (type $J (sub $I (struct (field eqref))))
+ ;; CHECK:       (type $K (sub $J (struct (field i31ref))))
+ (type $K (sub $J (struct (field i31ref))))
+ (rec
+  ;; CHECK:       (type $A (struct (field (ref null $A)) (field (ref null $I))))
+  (type $A  (sub    (struct (ref null $A) (ref null $I))))
+  ;; CHECK:       (type $C (sub $A (struct (field (ref null $A)) (field (ref null $K)))))
+
+  ;; CHECK:       (type $D2 (sub $C (struct (field (ref null $B)) (field (ref null $K)))))
+
+  ;; CHECK:       (type $B (sub $A (struct (field (ref null $B)) (field (ref null $J)))))
+  (type $B  (sub $A (struct (ref null $B) (ref null $J))))
+  (type $C  (sub $A (struct (ref null $A) (ref null $K))))
+  ;; CHECK:       (type $D1 (sub $B (struct (field (ref null $B)) (field (ref null $K)))))
+  (type $D1 (sub $B (struct (ref null $B) (ref null $K))))
+  (type $D2 (sub $C (struct (ref null $B) (ref null $K))))
+ )
+
+ ;; CHECK:      (global $g1 (ref $B) (struct.new_default $D1))
+ (global $g1 (ref $B) (struct.new_default $D1))
+ ;; CHECK:      (global $g2 (ref $C) (struct.new_default $D2))
+ (global $g2 (ref $C) (struct.new_default $D2))
+)
+
+;; Same as above, but with some additional types that can be merged.
+(module
+ ;; CHECK:      (rec
+ ;; CHECK-NEXT:  (type $I (struct (field anyref)))
+ (type $I (sub    (struct (field anyref))))
+ ;; CHECK:       (type $J (sub $I (struct (field eqref))))
+ (type $J (sub $I (struct (field eqref))))
+ ;; CHECK:       (type $K (sub $J (struct (field i31ref))))
+ (type $K (sub $J (struct (field i31ref))))
+ (rec
+  ;; CHECK:       (type $A (struct (field (ref null $A)) (field (ref null $I))))
+  (type $A  (sub     (struct (ref null $A) (ref null $I))))
+  (type $A' (sub $A  (struct (ref null $A) (ref null $I))))
+  ;; CHECK:       (type $C (sub $A (struct (field (ref null $A)) (field (ref null $K)))))
+
+  ;; CHECK:       (type $D2 (sub $C (struct (field (ref null $B)) (field (ref null $K)))))
+
+  ;; CHECK:       (type $B (sub $A (struct (field (ref null $B)) (field (ref null $J)))))
+  (type $B  (sub $A' (struct (ref null $B) (ref null $J))))
+  (type $B' (sub $B  (struct (ref null $B) (ref null $J))))
+  (type $C  (sub $A' (struct (ref null $A) (ref null $K))))
+  (type $C' (sub $C  (struct (ref null $A) (ref null $K))))
+  ;; CHECK:       (type $D1 (sub $B (struct (field (ref null $B)) (field (ref null $K)))))
+  (type $D1 (sub $B' (struct (ref null $B) (ref null $K))))
+  (type $D1' (sub $D1 (struct (ref null $B) (ref null $K))))
+  (type $D2 (sub $C' (struct (ref null $B) (ref null $K))))
+  (type $D2' (sub $D2 (struct (ref null $B) (ref null $K))))
+ )
+
+ ;; CHECK:      (global $g1 (ref $B) (struct.new_default $D1))
+ (global $g1 (ref $B') (struct.new_default $D1'))
+ ;; CHECK:      (global $g2 (ref $C) (struct.new_default $D2))
+ (global $g2 (ref $C') (struct.new_default $D2'))
+)
+
+ (global $g1 (ref $B) (struct.new_default $D1))
+ (global $g2 (ref $C) (struct.new_default $D2))
+)
+
 ;; Check that a ref.test inhibits merging (ref.cast is already checked above).
 (module
   ;; CHECK:      (rec
@@ -964,12 +1038,12 @@
   ;; CHECK:       (type $ref|$A|_=>_i32 (func (param (ref $A)) (result i32)))
 
   ;; CHECK:      (func $test (type $ref|$A|_=>_i32) (param $a (ref $A)) (result i32)
-  ;; CHECK-NEXT:  (ref.test $B
+  ;; CHECK-NEXT:  (ref.test (ref $B)
   ;; CHECK-NEXT:   (local.get $a)
   ;; CHECK-NEXT:  )
   ;; CHECK-NEXT: )
   (func $test (param $a (ref $A)) (result i32)
-    (ref.test $B
+    (ref.test (ref $B)
       (local.get $a)
     )
   )

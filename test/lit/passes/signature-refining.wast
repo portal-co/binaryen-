@@ -862,18 +862,18 @@
 
  ;; CHECK:      (func $0 (type $none_=>_none)
  ;; CHECK-NEXT:  (call $1
- ;; CHECK-NEXT:   (array.new_fixed $[i8])
+ ;; CHECK-NEXT:   (array.new_fixed $[i8] 0)
  ;; CHECK-NEXT:  )
  ;; CHECK-NEXT: )
  (func $0
   (call $1
-   (array.new_fixed $[i8])
+   (array.new_fixed $[i8] 0)
   )
  )
 
  ;; CHECK:      (func $1 (type $ref|$[i8]|_=>_none) (param $2 (ref $[i8]))
  ;; CHECK-NEXT:  (drop
- ;; CHECK-NEXT:   (ref.cast none
+ ;; CHECK-NEXT:   (ref.cast (ref none)
  ;; CHECK-NEXT:    (local.get $2)
  ;; CHECK-NEXT:   )
  ;; CHECK-NEXT:  )
@@ -882,9 +882,106 @@
   ;; The param will become non-nullable after we refine. We must refinalize
   ;; after doing so, so the cast becomes non-nullable as well.
   (drop
-   (ref.cast null struct
+   (ref.cast structref
     (local.get $2)
    )
   )
  )
-) ;; TODO
+)
+
+;; Test the call.without.effects intrinsic, which may require additional work.
+(module
+ (rec
+  ;; CHECK:      (rec
+  ;; CHECK-NEXT:  (type $A (struct ))
+  (type $A (struct))
+
+  ;; CHECK:       (type $B (sub $A (struct )))
+  (type $B (sub $A (struct)))
+
+  ;; CHECK:       (type $C (sub $B (struct )))
+  (type $C (sub $B (struct)))
+
+  ;; CHECK:       (type $return_A_2 (func (result (ref $C))))
+
+  ;; CHECK:       (type $return_A (func (result (ref $B))))
+  (type $return_A (func (result (ref null $A))))
+
+  (type $return_A_2 (func (result (ref null $A))))
+ )
+
+ ;; CHECK:       (type $none_=>_none (func))
+
+ ;; CHECK:       (type $funcref_=>_ref?|$A| (func (param funcref) (result (ref null $A))))
+
+ ;; CHECK:      (type $funcref_=>_ref|$B| (func (param funcref) (result (ref $B))))
+
+ ;; CHECK:      (type $funcref_=>_ref|$C| (func (param funcref) (result (ref $C))))
+
+ ;; CHECK:      (import "binaryen-intrinsics" "call.without.effects" (func $no.side.effects (type $funcref_=>_ref?|$A|) (param funcref) (result (ref null $A))))
+ (import "binaryen-intrinsics" "call.without.effects" (func $no.side.effects
+   (param funcref)
+   (result (ref null $A))
+ ))
+
+ ;; CHECK:      (import "binaryen-intrinsics" "call.without.effects" (func $no.side.effects_4 (type $funcref_=>_ref|$B|) (param funcref) (result (ref $B))))
+
+ ;; CHECK:      (import "binaryen-intrinsics" "call.without.effects" (func $no.side.effects_5 (type $funcref_=>_ref|$C|) (param funcref) (result (ref $C))))
+
+ ;; CHECK:      (elem declare func $other $other2)
+
+ ;; CHECK:      (func $func (type $none_=>_none)
+ ;; CHECK-NEXT:  (drop
+ ;; CHECK-NEXT:   (call $no.side.effects_4
+ ;; CHECK-NEXT:    (ref.func $other)
+ ;; CHECK-NEXT:   )
+ ;; CHECK-NEXT:  )
+ ;; CHECK-NEXT:  (drop
+ ;; CHECK-NEXT:   (call $no.side.effects_4
+ ;; CHECK-NEXT:    (ref.func $other)
+ ;; CHECK-NEXT:   )
+ ;; CHECK-NEXT:  )
+ ;; CHECK-NEXT:  (drop
+ ;; CHECK-NEXT:   (call $no.side.effects_5
+ ;; CHECK-NEXT:    (ref.func $other2)
+ ;; CHECK-NEXT:   )
+ ;; CHECK-NEXT:  )
+ ;; CHECK-NEXT: )
+ (func $func
+  ;; After $other's result is refined, this will need to use a new import that
+  ;; has the refined result type.
+  (drop
+   (call $no.side.effects
+    (ref.func $other)
+   )
+  )
+  ;; A second call of the same one. This should call the same new import (that
+  ;; is, we shouldn't create unnecessary copies of the new imports).
+  (drop
+   (call $no.side.effects
+    (ref.func $other)
+   )
+  )
+  ;; A call of another function with a different refining, that will need
+  ;; another import.
+  (drop
+   (call $no.side.effects
+    (ref.func $other2)
+   )
+  )
+ )
+
+ ;; CHECK:      (func $other (type $return_A) (result (ref $B))
+ ;; CHECK-NEXT:  (struct.new_default $B)
+ ;; CHECK-NEXT: )
+ (func $other (type $return_A) (result (ref null $A))
+  (struct.new $B) ;; this will allow this function's result to be refined to $B
+ )
+
+ ;; CHECK:      (func $other2 (type $return_A_2) (result (ref $C))
+ ;; CHECK-NEXT:  (struct.new_default $C)
+ ;; CHECK-NEXT: )
+ (func $other2 (type $return_A_2) (result (ref null $A))
+  (struct.new $C) ;; this will allow this function's result to be refined to $C
+ )
+)
