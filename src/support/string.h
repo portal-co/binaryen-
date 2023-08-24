@@ -24,6 +24,8 @@
 #include "support/utilities.h"
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -118,7 +120,45 @@ inline std::string trim(const std::string& input) {
 inline bool isNumber(const std::string& str) {
   return !str.empty() && std::all_of(str.begin(), str.end(), ::isdigit);
 }
+inline std::string wayDecode(const std::string& SRC) {
+  std::string ret;
+  char ch;
+  size_t i, ii;
+  for (i = 0; i < SRC.length(); i++) {
+    if (SRC[i] == '$') {
+      sscanf(SRC.substr(i + 1, 2).c_str(), "%lx", &ii);
+      ch = static_cast<char>(ii);
+      ret += ch;
+      i = i + 2;
+    } else {
+      ret += SRC[i];
+    }
+  }
+  return (ret);
+}
+inline std::string wayEncode(const std::string& value) {
+  std::ostringstream escaped;
+  escaped.fill('0');
+  escaped << std::hex;
 
+  for (std::string::const_iterator i = value.begin(), n = value.end(); i != n;
+       ++i) {
+    std::string::value_type c = (*i);
+
+    // Keep alphanumeric and other accepted characters intact
+    if (isalnum(c)) {
+      escaped << c;
+      continue;
+    }
+
+    // Any other characters are percent-encoded
+    escaped << std::uppercase;
+    escaped << '$' << std::setw(2) << int((unsigned char)c);
+    escaped << std::nouppercase;
+  }
+
+  return escaped.str();
+}
 } // namespace wasm::String
 
 #endif // wasm_support_string_h

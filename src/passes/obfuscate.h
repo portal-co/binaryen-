@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <pass.h>
+#include "code_finder.h"
 namespace wasm {
 template<typename T> struct Types {
   T i32;
@@ -80,35 +81,70 @@ struct WarpLocals : WalkerPass<PostWalker<WarpLocals>> {
       t = w.to(t, getModule());
   }
 };
-template<typename S, typename I>
-struct SwizzlePass : WalkerPass<PostWalker<SwizzlePass<S, I>>> {
+template<typename T> struct FuncPass : Pass {
+  T func;
+  FuncPass(T a) : func(a) {}
+  // Implement this with code to run the pass on the whole module
+  void run(Module* module) override { func(getPassRunner())->run(module); }
+
+  // Implement this with code to run the pass on a single function, for
+  // a function-parallel pass
+  void runOnFunction(Module* module, Function* function) override {
+    func(getPassRunner())->runOnFunction(module, function);
+  }
+  bool isFunctionParallel() override {
+    return func(getPassRunner())->isFunctionParallel();
+  }
+  std::unique_ptr<Pass> create() override {
+    return new FuncPass(
+      [=](auto* x) -> std::unique_ptr<Pass> { return func(x)->create(); });
+  }
+};
+template<typename S, typename I, typename E>
+struct SwizzlePass : WalkerPass<PostWalker<SwizzlePass<S, I, E>>> {
   S swizzle;
   I swizzle_imports;
-  SwizzlePass(S a, I b) : swizzle(a), swizzle_imports(b) {}
-  void visitCall(Call* c) { c->target = swizzle(c->target, this); }
+  E swizzle_export;
+  SwizzlePass(S a, I b, E c)
+    : swizzle(a), swizzle_imports(b), swizzle_export(c) {}
+  void visitCall(Call* c) { c->target = swizzle(c->target, this, true); }
   void doWalkFunction(Function* func) {
-    func->name = swizzle(func->name, this);
+    func->name = swizzle(func->name, this, false);
     if (func->imported()) {
       Importable* i = func;
-      swizzle_imports(i, ExternalKind::Function);
+      swizzle_imports(i, ExternalKind::Function, this);
     }
     this->walk(func->body);
   }
-  void visitRefFunc(RefFunc* f) { f->func = swizzle(f->func, this); }
+  void visitRefFunc(RefFunc* f) { f->func = swizzle(f->func, this, true); }
+  void visitExport(Export* e) {
+    e->name = swizzle_export(e->name, e->kind, this);
+    if (e->kind == ExternalKind::Function) {
+      e->value = swizzle(e->value, this, true);
+    }
+  }
 };
-// inline auto rename(Name from, Name to) {
-//   return SwizzlePass([=](Name a) -> Name {
-//     if (a == from) {
-//       return to;
-//     }
-//     if (a == to) {
-//       return from;
-//     }
-//     return a;
-//   },[=](Importable *i, ExternalKind k){
+inline Pass* rename(std::map<Name, Name> m) {
+  return new SwizzlePass(
+    [=](Name a, Pass* b, bool isRef) -> Name {
+      if (!isRef) {
+        for (auto [from, to] : m) {
+          if (a == from) {
+            return to;
+          }
+          if (a == to) {
+            return from;
+          }
+        }
+        return a;
+      }
+      return a;
+    },
+    [=](Importable* i, ExternalKind k, Pass* p) {
 
-//   });
-// }
+    },
+    [=](Name a, ExternalKind k, Pass* p) -> Name { return a; });
+}
 struct ScratchSpacePass : Pass {
   virtual Name type() { WASM_UNREACHABLE("unimplemented"); }
   virtual Name transform(Name x) {

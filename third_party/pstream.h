@@ -1061,8 +1061,7 @@ namespace redi
        * @return @c *this
        */
       istream_type&
-      out()
-      {
+      out(){
         this->buf_.read_err(false);
         return *this;
       }
@@ -1073,8 +1072,7 @@ namespace redi
        * @return @c *this
        */
       istream_type&
-      err()
-      {
+      err(){
         this->buf_.read_err(true);
         return *this;
       }
